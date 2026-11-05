@@ -230,12 +230,15 @@ const ATTR=(function(){
   return final;
 })();
 function staffWorks(s,dateObj){
+  const key=ymd(dateObj);
+  if(ovrAll[key]===false)return false;
+  if(s.available_from&&key<s.available_from)return false;
+  if(s.available_until&&key>s.available_until)return false;
+  const ov=ovrStaff[key+'|'+s.id];
+  if(ov!==undefined)return ov===true;
   const k=DKEY[dateObj.getDay()];
   const wd=Array.isArray(s.workdays)?s.workdays:[];
   if(wd.length&&!wd.includes(k))return false;
-  const key=dateObj.getFullYear()+'-'+String(dateObj.getMonth()+1).padStart(2,'0')+'-'+String(dateObj.getDate()).padStart(2,'0');
-  if(s.available_from&&key<s.available_from)return false;
-  if(s.available_until&&key>s.available_until)return false;
   return true;
 }
 
@@ -247,12 +250,14 @@ const BLOCK_H=2; // bloques de 2 horas
 let view='week';
 let cur=new Date();
 let services=[], comps=[], staff=[], schedule={}, busy=[];
+let ovrAll={}, ovrStaff={};
 let sel={date:null,startH:null}; // selección de bloque
 let selComps=new Set();
 
 function ymd(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function sameDay(a,b){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();}
 function dayCfg(date){
+  if(ovrAll[ymd(date)]===false)return null;   // estudio cerrado ese día
   const v=schedule[DKEY[date.getDay()]];
   if(!v)return null;
   if(Array.isArray(v))return {open:v[0],close:v[1],lunch:null};
@@ -262,13 +267,19 @@ function hourOf(t){return parseInt(String(t).split(':')[0]);}
 
 async function boot(){
   try{
-    const [s,c,st,sc]=await Promise.all([
+    const [s,c,st,sc,ov]=await Promise.all([
       sb.from('public_services').select('*').order('sort_order'),
       sb.from('public_complements').select('*').order('sort_order'),
       sb.from('public_staff').select('*').order('full_name'),
-      sb.from('public_schedule').select('*')
+      sb.from('public_schedule').select('*'),
+      sb.from('public_day_overrides').select('*')
     ]);
     services=s.data||[]; comps=c.data||[]; staff=st.data||[];
+    ovrAll={};ovrStaff={};
+    (ov&&ov.data||[]).forEach(o=>{
+      const d=String(o.day).slice(0,10);
+      if(o.staff_id)ovrStaff[d+'|'+o.staff_id]=o.available; else ovrAll[d]=o.available;
+    });
     // elegir el registro de horario que tenga lunch configurado (el más completo)
     const schedRows=sc.data||[];
     const best=schedRows.find(r=>{
